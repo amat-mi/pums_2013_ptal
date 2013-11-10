@@ -1,0 +1,121 @@
+select id_fermata, nodo_partenza, seq, node, min(cost), ord1, ord2, linea, tipologia, id_fermata, freq_cum_8_9 from (
+select *, row_number() OVER (partition by node order by cost) as ord1,
+row_number() OVER (partition by linea, node order by cost) as ord2
+        from 
+             ( SELECT id_fermata, nodo_partenza, seq, node, round(cost::decimal, 2) as cost 
+                FROM   ptal.out_costo 
+                  join 
+                       ptal.out_nodi_fermata 
+                  on nodo_partenza = id ) as a
+           join 
+             ( SELECT linea, tipologia, id_fermata, round(1/freq_cum_8_9, 2) as freq_cum_8_9
+               FROM ptal.fermate_tpl_frequenza ) as b
+           using(id_fermata)
+where node = 216 and linea = 27
+order by cost
+) as a
+group by id_fermata, nodo_partenza, seq, node, cost, ord1, linea, tipologia, id_fermata, freq_cum_8_9
+
+-------------------
+
+--select nodo, 
+select *, CASE WHEN ord_fermate = 1 then 1 else 0.5 end as contributo_fermata from (
+--SELECT depname, empno, salary, avg(salary) OVER (PARTITION BY depname) FROM empsalary;
+--select id_fermata, nodo_partenza, seq, node, min(cost), ord2, linea, tipologia, id_fermata, freq_cum_8_9 from (
+select *, row_number() OVER (partition by node order by cost) as ord_fermate,
+row_number() OVER (partition by linea, node order by cost) as ord_linee,
+CASE WHEN tipologia = 'Automobilistica' then 640 else 960 end as massima_distanza
+        from 
+             ( SELECT id_fermata, nodo_partenza as nodo_fermata, seq, node, round(cost::decimal, 2) as cost 
+                FROM   ptal.out_costo 
+                  join 
+                       ptal.out_nodi_fermata 
+                  on nodo_partenza = id ) as a
+           join 
+             ( SELECT linea, tipologia, id_fermata, freq_cum_8_9
+               FROM ptal.fermate_tpl_frequenza ) as b
+           using(id_fermata)
+--where node = 216 --and linea = 27 
+order by node, linea, ord_linee--lineacost
+--) as a group by id_fermata, nodo_partenza, seq, node, cost, ord2, linea, tipologia, id_fermata, freq_cum_8_9
+) as a
+where ord_linee = 1 -- vincolo che prende in considerazione solo la fermata piu vicina per ogni linea
+and cost <= massima_distanza -- Vincolo sulla distanza per tipologia di fermata
+order by node, ord_fermate
+
+
+---------
+
+select *, row_number() OVER (partition by node, tipologia_accesso  order by edf) as ordine
+from (
+select *, CASE WHEN seq = 0 then 1 else 0.5 end as contributo_fermata,  
+round((cost/80)+((1/freq_cum_8_9*0.5)+CASE WHEN tipologia in ('Automobilistica', 'Tranviaria') then 2 else 0.75 end), 2) as tat, 
+round((1/freq_cum_8_9*0.5)+CASE WHEN tipologia in ('Automobilistica', 'Tranviaria') then 2 else 0.75 end, 2) as attesa, 
+round(cost/80, 2) as walktime,
+round(30/((cost/80)+((1/freq_cum_8_9*0.5)+CASE WHEN tipologia in ('Automobilistica', 'Tranviaria') then 2 else 0.75 end)), 2) as edf
+
+from (
+--SELECT depname, empno, salary, avg(salary) OVER (PARTITION BY depname) FROM empsalary;
+--select id_fermata, nodo_partenza, seq, node, min(cost), ord2, linea, tipologia, id_fermata, freq_cum_8_9 from (
+select *, row_number() OVER (partition by node order by cost) as ord_fermate,
+row_number() OVER (partition by linea, node order by cost) as ord_linee,
+CASE WHEN tipologia in ('Automobilistica', 'Tranviaria') then 640 else 960 end as massima_distanza,
+CASE WHEN tipologia in ('Automobilistica', 'Tranviaria') then 'buses' else 'rail' end as tipologia_accesso
+        from 
+             ( SELECT id_fermata, nodo_partenza as nodo_fermata, seq, node, round(cost::decimal, 2) as cost 
+                FROM   ptal.out_costo 
+                  join 
+                       ptal.out_nodi_fermata 
+                  on nodo_partenza = id ) as a
+           join 
+             ( SELECT linea, tipologia, id_fermata, freq_cum_8_9
+               FROM ptal.fermate_tpl_frequenza 
+               WHERE freq_cum_8_9 <> 0 ) as b
+           using(id_fermata)
+--where seq = 0--and linea = 27 
+order by node, linea, ord_linee--lineacost
+--) as a group by id_fermata, nodo_partenza, seq, node, cost, ord2, linea, tipologia, id_fermata, freq_cum_8_9
+) as a
+where ord_linee = 1 -- vincolo che prende in considerazione solo la fermata piu vicina per ogni linea
+and cost <= massima_distanza -- Vincolo sulla distanza per tipologia di fermata
+--and ord_fermate in (1, 2)
+order by node, linea, ord_fermate
+) as a
+
+--------------------------------------
+---------ULTIMA VERSIONE-------------------------
+--------------------------------------
+select node, sum(Accessibility_index) as Accessibility_index from (
+---- SELEZIONO gli accessibile index ---
+select *, edf*(CASE WHEN ordine = 1 then 1 else 0.5 end) as Accessibility_index
+from ( select *, row_number() OVER (partition by node, tipologia_accesso  order by edf desc ) as ordine
+from ( select *, 
+round((cost/80)+((1/freq_cum_8_9*0.5)+CASE WHEN tipologia in ('Automobilistica', 'Tranviaria') then 2 else 0.75 end), 2) as tat, 
+round((1/freq_cum_8_9*0.5)+CASE WHEN tipologia in ('Automobilistica', 'Tranviaria') then 2 else 0.75 end, 2) as attesa, 
+round(cost/80, 2) as walktime,
+round(30/((cost/80)+((1/freq_cum_8_9*0.5)+CASE WHEN tipologia in ('Automobilistica', 'Tranviaria') then 2 else 0.75 end)), 2) as edf
+from (
+select *, row_number() OVER (partition by node order by cost) as ord_fermate,
+row_number() OVER (partition by linea, node order by cost) as ord_linee,
+CASE WHEN tipologia in ('Automobilistica', 'Tranviaria') then 640 else 960 end as massima_distanza,
+CASE WHEN tipologia in ('Automobilistica', 'Tranviaria') then 'buses' else 'rail' end as tipologia_accesso
+        from 
+             ( SELECT id_fermata, nodo_partenza as nodo_fermata, seq, node, round(cost::decimal, 2) as cost 
+                FROM   ptal.out_costo 
+                  join 
+                       ptal.out_nodi_fermata 
+                  on nodo_partenza = id ) as a
+           join 
+             ( SELECT linea, tipologia, id_fermata, freq_cum_8_9
+               FROM ptal.fermate_tpl_frequenza 
+               WHERE freq_cum_8_9 <> 0 ) as b
+           using(id_fermata)
+--where seq = 0--and linea = 27 
+order by node, linea, ord_linee--lineacost
+) as a
+where ord_linee = 1 -- vincolo che prende in considerazione solo la fermata piu vicina per ogni linea
+and cost <= massima_distanza -- Vincolo sulla distanza per tipologia di fermata
+--and ord_fermate in (1, 2)
+order by node, linea, ord_fermate
+) as a ) as foo ) as foooo
+group by node
